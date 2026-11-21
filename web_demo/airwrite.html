@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ParkiScribe air-writing</title>
+<style>
+:root{--bg:#f3f5f2;--card:#fff;--ink:#14212b;--mute:#4b5b66;--line:#cfd8d3;--trace:#1f6f8b;--warn:#8a4b00;--warnbg:#fff3df;--ok:#1b6b3a;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#0f171d;--card:#17222a;--ink:#e8eef2;--mute:#9fb0bb;--line:#2c3b45;--trace:#6cc3de;--warn:#ffcf8a;--warnbg:#3a2a10;--ok:#7bd89b;--bad:#ff9b92}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.5 "Atkinson Hyperlegible",Verdana,system-ui,sans-serif}
+header{padding:12px 18px;border-bottom:1px solid var(--line)}h1{font-size:24px;margin:0}
+#banner{background:var(--warnbg);color:var(--warn);padding:8px 18px;font-size:15px}
+main{max-width:1180px;margin:auto;padding:16px;display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(360px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+button{font:inherit;background:var(--trace);color:#fff;border:0;border-radius:8px;padding:10px 16px;min-height:46px;cursor:pointer}
+@media (prefers-color-scheme:dark){button{color:#06202b}}
+button.alt{background:transparent;color:var(--ink);border:2px solid var(--line)}button:disabled{opacity:.45;cursor:not-allowed}
+input,select{font:inherit;color:var(--ink);background:var(--card);border:2px solid var(--line);border-radius:8px;padding:8px;min-height:44px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}.mute{color:var(--mute)}
+#stage{position:relative;transform:scaleX(-1);background:#000;border-radius:10px;overflow:hidden}
+#stage video,#stage canvas{display:block;width:100%}#ov{position:absolute;inset:0}
+#wc{width:100%;background:var(--card);border:2px solid var(--line);border-radius:10px;touch-action:none;display:block}
+.state{font-size:28px;font-weight:700;color:var(--trace)}.bar{height:14px;background:var(--trace);border-radius:7px;min-width:2px}
+.big{font-size:56px;font-weight:700;line-height:1;color:var(--trace)}.err{color:var(--bad);font-weight:700}.ok{color:var(--ok);font-weight:700}
+td,th{padding:4px 8px;text-align:left}#msg{font-size:28px;min-height:42px;border:2px solid var(--line);border-radius:8px;padding:6px 10px;width:100%}
+</style>
+</head>
+<body>
+<header><h1>ParkiScribe air-writing</h1></header>
+<div id="banner">Pilot mode: nonclinical testing only. Research prototype, not a diagnostic or medical tool. Video stays on this computer and is not recorded.</div>
+<main>
+<section class="card">
+ <div class="row"><button id="go">Start camera and hand tracking</button><button class="alt" id="stop" disabled>Stop</button><span id="status" class="mute">Not started.</span></div>
+ <div id="stage"><video id="vid" playsinline muted></video><canvas id="ov"></canvas></div>
+ <p><span class="state" id="gs">no hand</span> <span class="mute" id="info"></span></p>
+ <p class="mute">Index finger only: write. Index and middle finger: lift the pen and move. Closed fist for half a second: clear. The preview is mirrored like a mirror, so write letters the way they look to you.</p>
+</section>
+<section class="card">
+ <canvas id="wc" width="640" height="480" aria-label="Writing area"></canvas>
+ <div class="row"><button id="rec">Recognize</button><button class="alt" id="clr">Clear</button>
+  <label><input type="checkbox" id="auto" checked style="min-height:0"> Recognize automatically after a pause</label></div>
+ <p class="mute">You can also draw here with the mouse to test recognition without the camera.</p>
+ <div id="res"></div>
+ <div class="row"><label for="intent">Letter you meant to write (optional, to measure accuracy)</label><input id="intent" maxlength="1" size="2"></div>
+ <div class="row"><label for="conf">Confirm or correct</label><input id="conf" maxlength="1" size="2"><button id="add" disabled>Add to message</button><button class="alt" id="save" disabled>Save sample</button></div>
+ <div id="msg" aria-live="polite"></div>
+ <div class="row"><button class="alt" id="bk">Backspace</button><button class="alt" id="cm">Clear message</button><button class="alt" id="sp">Read message aloud</button></div>
+ <div class="mute" id="tally"></div>
+ <div class="row"><button class="alt" id="dl">Download saved samples (JSON)</button></div>
+</section>
+</main>
+<script src="recognizer.js"></script>
+<script type="module">
+import {HandLandmarker, FilesetResolver} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+const WASM="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const MODELS=["models/hand_landmarker.task","https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"];
+const $=s=>document.querySelector(s), KEY="parkiscribe.airwrite.v1";
+const CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+let saved=[];try{saved=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){}
+const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify(saved));return true}catch(e){return false}};
+
+/* ---- recognizer ---- */
+const rec=GlyphRecognizer.create({makeCanvas:(w,h)=>{const c=document.createElement("canvas");c.width=w;c.height=h;return c},
+  fonts:["Helvetica","Arial","Verdana","Trebuchet MS","DejaVu Sans","Liberation Sans"]});
+
+/* ---- gesture logic (same rules as backend/app/collection/gesture_detector.py) ---- */
+const FING=[[6,8],[10,12],[14,16],[18,20]],RATIO=1.10;
+const fingers=h=>{const w=h.lm[0];return FING.map(([p,t])=>{const P=h.lm[p],T=h.lm[t];return(!w||!P||!T)?null:Math.hypot(T.x-w.x,T.y-w.y)>Math.hypot(P.x-w.x,P.y-w.y)*RATIO})};
+function classify(f){if(!f.length)return"none";const[i,m,r,p]=f;if(i===null||m===null)return"unknown";
+ if(r===null||p===null)return i&&m?"pen_lift":i&&!m?"draw":"unknown";
+ if(!(i||m||r||p))return"fist";if(i&&m)return"pen_lift";if(i&&!m)return"draw";if(p&&!i&&!m)return"erase";return"idle"}
+let sm={state:"none",cand:null,n:0};
+const debounce=raw=>{if(raw===sm.state){sm.cand=null;sm.n=0;return sm.state}if(raw!==sm.cand){sm.cand=raw;sm.n=1}else sm.n++;if(sm.n>=2){sm.state=raw;sm.cand=null;sm.n=0}return sm.state};
+
+/* ---- state ---- */
+let strokes=[],cur=null,frames=[],lastDrawEnd=0,recognized=true,lastResult=null,fistSince=0,losses=0,hadHand=false;
+const wc=$("#wc"),wx=wc.getContext("2d");
+const COL=()=>getComputedStyle(document.documentElement).getPropertyValue("--trace");
+function redraw(){wx.clearRect(0,0,wc.width,wc.height);wx.lineWidth=6;wx.lineCap=wx.lineJoin="round";wx.strokeStyle=COL();wx.fillStyle=COL();
+ for(const s of strokes){if(s.length===1){wx.beginPath();wx.arc((1-s[0].x)*wc.width,s[0].y*wc.height,3,0,7);wx.fill();continue}
+  wx.beginPath();s.forEach((p,i)=>{const X=(1-p.x)*wc.width,Y=p.y*wc.height;i?wx.lineTo(X,Y):wx.moveTo(X,Y)});wx.stroke()}}
+function clearAll(){strokes=[];cur=null;recognized=true;lastResult=null;$("#res").innerHTML="";$("#add").disabled=$("#save").disabled=true;redraw()}
+
+/* ---- recognition (input = mirrored view coordinates, light 3-point smoothing; raw strokes are kept untouched) ---- */
+function smooth(s){return s.map((p,i)=>{const a=s[Math.max(0,i-1)],b=s[Math.min(s.length-1,i+1)];return{x:(a.x+p.x+b.x)/3,y:(a.y+p.y+b.y)/3}})}
+function recognize(){const input=strokes.filter(s=>s.length>=2).map(s=>smooth(s.map(p=>({x:1-p.x,y:p.y}))));
+ const r=rec.recognize(input,3);recognized=true;
+ if(r.error){$("#res").innerHTML='<p class="err">Too little writing to recognize. Write a bigger letter.</p>';return}
+ lastResult=r;const unsure=r.margin<0.03;
+ $("#res").innerHTML=`<div class="row"><span class="big">${r.top[0].ch}</span><span>${unsure?'<span class="err">Not sure. Check the other guesses.</span>':'Best match'}</span></div>
+ <table>${r.top.map(t=>`<tr><td><b>${t.ch}</b></td><td style="width:200px"><div class="bar" style="width:${Math.max(2,t.score*100)}%"></div></td><td>${(t.score*100).toFixed(0)}% similar</td></tr>`).join("")}</table>
+ <p class="mute">Similarity to letter shapes, not a probability. This is template matching, not a trained model. O and 0, I and 1, B and 8 are easily confused.</p>`;
+ $("#conf").value=$("#intent").value.toUpperCase()||r.top[0].ch;$("#add").disabled=$("#save").disabled=false}
+$("#rec").onclick=recognize;$("#clr").onclick=clearAll;
+
+/* ---- mouse practice (stored in the same camera-space convention: x un-mirrored) ---- */
+let md=false;const pt=e=>{const r=wc.getBoundingClientRect();return{x:1-(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height,t:performance.now()}};
+wc.onpointerdown=e=>{wc.setPointerCapture(e.pointerId);md=true;cur=[pt(e)];strokes.push(cur);recognized=false;redraw()};
+wc.onpointermove=e=>{if(md){cur.push(pt(e));redraw()}};
+wc.onpointerup=wc.onpointercancel=()=>{if(md){md=false;cur=null;lastDrawEnd=performance.now()}};
+
+/* ---- message ---- */
+let message="";const showMsg=()=>$("#msg").textContent=message;
+$("#add").onclick=()=>{const c=$("#conf").value.toUpperCase();if(c){message+=c;showMsg()}clearAll()};
+$("#bk").onclick=()=>{message=message.slice(0,-1);showMsg()};$("#cm").onclick=()=>{message="";showMsg()};
+$("#sp").onclick=()=>{if(message&&"speechSynthesis" in window)speechSynthesis.speak(new SpeechSynthesisUtterance(message))};
+
+/* ---- saved samples ---- */
+function tally(){const l=saved.filter(s=>s.intended);const ok=l.filter(s=>s.predicted===s.intended).length;
+ $("#tally").textContent=`${saved.length} saved samples. Of ${l.length} with an intended letter, the top guess matched ${ok}${l.length?` (${(100*ok/l.length).toFixed(0)}%)`:""}. Small numbers are not reliable.`}
+$("#save").onclick=()=>{if(!lastResult)return;saved.push({at:new Date().toISOString(),source:strokes.some(s=>s[0]&&s[0].seq!==undefined)?"camera":"pointer",
+  intended:$("#intent").value.toUpperCase()||null,confirmed:$("#conf").value.toUpperCase()||null,predicted:lastResult.top[0].ch,top3:lastResult.top,
+  strokes_raw:strokes,coordinate_convention:"x un-mirrored camera frame, y down, normalized; t in ms"});
+ $("#save").disabled=true;if(!persist())alert("Could not save: browser storage is full or blocked.");tally()};
+$("#dl").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(saved,null,1)],{type:"application/json"}));a.download="parkiscribe_samples.json";a.click()};
+tally();
+
+/* ---- camera + tracking ---- */
+let landmarker=null,stream=null,running=false,lastTs=0,seq=0,times=[];const vid=$("#vid"),ov=$("#ov"),ox=ov.getContext("2d");
+const setStatus=(t,bad)=>{$("#status").textContent=t;$("#status").className=bad?"err":"mute"};
+async function makeLandmarker(){const fs=await FilesetResolver.forVisionTasks(WASM);let last;
+ for(const m of MODELS)for(const d of["GPU","CPU"]){try{return await HandLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:m,delegate:d},runningMode:"VIDEO",numHands:2,minHandDetectionConfidence:.5,minHandPresenceConfidence:.5,minTrackingConfidence:.5})}catch(e){last=e}}
+ throw last}
+$("#go").onclick=async()=>{
+ if(!window.isSecureContext){setStatus("Open this page at http://localhost:8080/airwrite.html (not by double-clicking the file) so the browser allows the camera.",true);return}
+ $("#go").disabled=true;setStatus("Loading hand tracker (first time downloads about 10 MB)...");
+ try{landmarker=landmarker||await makeLandmarker()}catch(e){setStatus("Could not load the hand tracker: "+(e.message||e)+". Check your internet connection (it loads MediaPipe from the web).",true);$("#go").disabled=false;return}
+ try{stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60}},audio:false})}
+ catch(e){setStatus(`Camera blocked or busy (${e.name}). Allow camera access for this site and close other apps using the camera.`,true);$("#go").disabled=false;return}
+ vid.srcObject=stream;await vid.play();ov.width=vid.videoWidth;ov.height=vid.videoHeight;running=true;seq=0;lastTs=0;times=[];$("#stop").disabled=false;setStatus("Tracking. Show your hand to the camera.");
+ const loop=(now,meta)=>{if(!running)return;try{frame(now,meta)}catch(e){setStatus("Tracking error: "+e.message,true)}vid.requestVideoFrameCallback?vid.requestVideoFrameCallback(loop):requestAnimationFrame(loop)};
+ vid.requestVideoFrameCallback?vid.requestVideoFrameCallback(loop):requestAnimationFrame(loop)};
+$("#stop").onclick=()=>{running=false;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;$("#go").disabled=false;$("#stop").disabled=true;ox.clearRect(0,0,ov.width,ov.height);setStatus("Stopped.");$("#gs").textContent="no hand"};
+
+function frame(now,meta){
+ const t=(meta&&meta.captureTime)||now;let ts=Math.max(lastTs+1,Math.round(now));lastTs=ts;
+ const res=landmarker.detectForVideo(vid,ts);times.push(now);if(times.length>90)times.shift();
+ const hands=(res.landmarks||[]).map((lm,i)=>({lm,handed:res.handednesses[i]&&res.handednesses[i][0].categoryName,score:res.handednesses[i]?res.handednesses[i][0].score:0}));
+ let sel=-1;hands.forEach((h,i)=>{if(sel<0||h.score>hands[sel].score)sel=i});
+ frames.push({seq,t,hands:hands.map(h=>({handedness:h.handed,score:h.score,landmarks:h.lm.map(p=>({x:p.x,y:p.y,z:p.z}))}))});if(frames.length>30000)frames.shift();
+ ox.clearRect(0,0,ov.width,ov.height);
+ let state="none";
+ if(sel>=0){const h=hands[sel];hadHand=true;const raw=classify(fingers(h));state=debounce(raw);
+  ox.lineWidth=3;ox.strokeStyle="#2dd4bf";CONN.forEach(([a,b])=>{ox.beginPath();ox.moveTo(h.lm[a].x*ov.width,h.lm[a].y*ov.height);ox.lineTo(h.lm[b].x*ov.width,h.lm[b].y*ov.height);ox.stroke()});
+  ox.fillStyle="#fff";h.lm.forEach(p=>{ox.beginPath();ox.arc(p.x*ov.width,p.y*ov.height,3,0,7);ox.fill()});
+  const tip=h.lm[8];ox.fillStyle=state==="draw"?"#22c55e":"#f59e0b";ox.beginPath();ox.arc(tip.x*ov.width,tip.y*ov.height,10,0,7);ox.fill();
+  if(state==="draw"){if(!cur||cur.cam!==true){cur=[];cur.cam=true;strokes.push(cur)}cur.push({x:tip.x,y:tip.y,t,seq});recognized=false;redraw()}
+  else if(cur&&cur.cam){cur=null;lastDrawEnd=now}
+  if(state==="fist"){if(!fistSince)fistSince=now;else if(now-fistSince>500){clearAll();fistSince=0}}else fistSince=0;
+ }else{if(hadHand){losses++;hadHand=false}state=debounce("none");if(cur&&cur.cam){cur=null;lastDrawEnd=now}fistSince=0}
+ $("#gs").textContent={draw:"writing",pen_lift:"pen lifted",fist:"fist (hold to clear)",none:"no hand",idle:"idle",unknown:"unclear",erase:"idle"}[state]||state;
+ seq++;
+ if(times.length>10){const fps=1000*(times.length-1)/(times[times.length-1]-times[0]);$("#info").textContent=`${fps.toFixed(0)} frames/s, ${vid.videoWidth}x${vid.videoHeight}, hand lost ${losses} times, ${hands.length} hand(s)`}
+}
+setInterval(()=>{if($("#auto").checked&&!recognized&&!cur&&strokes.length&&performance.now()-lastDrawEnd>1500)recognize()},300);
+</script>
+</body>
+</html>
