@@ -21,4 +21,4 @@ On first install the research protocol is inactive: only nonclinical **pilot mod
 ## Layout
 `backend/app/collection/` hand tracking + air-writing (Python, offline/validation) ·
 `frontend/src/features/hand-tracking/` same logic in TypeScript (live) ·
-`backend/tests/fixtures/` shared constructed fixtures · `MIGRATION_NOTES.md` · `PROGRESS.md`
+`web_demo/` live camera demo + recognizer · `docs/` · `backend/scripts/create_admin.py` · `backend/tests/fixtures/` shared constructed fixtures · `MIGRATION_NOTES.md` · `PROGRESS.md`
