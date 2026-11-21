@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ParkiScribe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3f5f2;--card:#fff;--ink:#14212b;--mute:#4b5b66;--line:#cfd8d3;--trace:#1f6f8b;--warn:#8a4b00;--warnbg:#fff3df;--ok:#1b6b3a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f171d;--card:#17222a;--ink:#e8eef2;--mute:#9fb0bb;--line:#2c3b45;--trace:#6cc3de;--warn:#ffcf8a;--warnbg:#3a2a10;--ok:#7bd89b}}
+:root[data-theme="dark"]{--bg:#0f171d;--card:#17222a;--ink:#e8eef2;--mute:#9fb0bb;--line:#2c3b45;--trace:#6cc3de;--warn:#ffcf8a;--warnbg:#3a2a10;--ok:#7bd89b}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:18px/1.55 "Atkinson Hyperlegible",Verdana,system-ui,sans-serif}
+a{color:var(--trace)}:focus-visible{outline:3px solid var(--trace);outline-offset:2px}
+header{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);border-bottom:1px solid var(--line);z-index:5}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--bg);z-index:10}
+.bar{max-width:1060px;margin:auto;padding:10px 18px;display:flex;gap:6px 18px;flex-wrap:wrap;align-items:center}
+.logo{font-weight:700;font-size:22px;margin-right:auto;text-decoration:none;color:var(--ink)}
+nav a{padding:8px 4px;text-decoration:none;color:var(--ink);border-bottom:3px solid transparent}nav a[aria-current]{border-color:var(--trace);font-weight:700}
+#banner{background:var(--warnbg);color:var(--warn);padding:8px 18px;text-align:center;font-size:16px}
+main{max-width:1060px;margin:auto;padding:24px 18px 64px}
+h1{font-size:clamp(30px,5vw,46px);line-height:1.15;margin:.2em 0 .4em}h2{font-size:26px;margin:1.4em 0 .4em}h3{font-size:20px;margin:1em 0 .3em}
+p,li{max-width:70ch}.mute{color:var(--mute)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin:14px 0}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+button,select,input,textarea{font:inherit;color:var(--ink)}
+button{background:var(--trace);color:#fff;border:0;border-radius:8px;padding:12px 18px;min-height:48px;cursor:pointer}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) button{color:#06202b}}
+button.alt{background:transparent;color:var(--ink);border:2px solid var(--line)}button:disabled{opacity:.45;cursor:not-allowed}
+select,input,textarea{background:var(--card);border:2px solid var(--line);border-radius:8px;padding:10px;min-height:46px;width:100%}
+label{display:block;margin:10px 0 4px;font-weight:700}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.row>*{flex:0 0 auto}
+canvas{width:100%;background:var(--card);border:2px solid var(--line);border-radius:10px;touch-action:none;display:block}
+.prompt{font-size:clamp(40px,10vw,84px);line-height:1;font-weight:700;color:var(--trace);margin:6px 0}
+table{border-collapse:collapse;width:100%;font-size:16px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}.scroll{overflow-x:auto}
+.tag{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:1px 8px;font-size:14px;color:var(--mute)}
+.stat b{display:block;font-size:30px}.err{color:#b3261e;font-weight:700}.okc{color:var(--ok);font-weight:700}
+video{max-width:100%;border-radius:10px;background:#000}
+</style>
+</head>
+<body>
+<header><div class="bar"><a class="logo" href="#home">ParkiScribe</a>
+<nav id="nav" aria-label="Main"></nav></div>
+<div id="banner" role="status">Pilot mode: nonclinical testing only. No research protocol is active, so clinical recording is disabled.</div></header>
+<main id="app"></main>
+<script>
+"use strict";
+const KEY="parkiscribe.v1", TASKS={
+ character:[..."ABCDEFGHIJKLMNOPQRSTUVWXYZ",..."abcdefghijklmnopqrstuvwxyz",..."0123456789"],
+ word:["HELP","WATER","FOOD","MEDICINE","PAIN","YES","NO","DOCTOR","NURSE","HOME","FAMILY","BATHROOM","TIRED","THANK YOU","PLEASE"],
+ sentence:["I NEED HELP.","PLEASE GIVE ME WATER.","I AM FEELING TIRED.","I NEED MY MEDICINE.","I AM IN PAIN.","PLEASE CALL MY FAMILY.","I WANT TO GO HOME.","I NEED TO SEE THE DOCTOR."],
+ freeform:[]};
+const PAGES=[["home","Home"],["studio","Writing studio"],["sessions","My recordings"],["research","Research view"],["consent","Consent and privacy"],["about","About and limits"]];
+let S={consent:null,recs:[]};
+try{const r=localStorage.getItem(KEY);if(r)S=JSON.parse(r)}catch(e){}
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S));return true}catch(e){return false}};
+const $=(s,r=document)=>r.querySelector(s), esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const num=(v,d=2)=>v==null||!isFinite(v)?"n/a":Number(v).toFixed(d);
+
+/* ---- measurement helpers (raw samples are never smoothed or resampled) ---- */
+function timing(ts){const n=ts.length,o={n,monotonic:true,median:null,fps:null,dropped:0,usable:false};if(n<3)return o;
+ const d=[];for(let i=1;i<n;i++)d.push(ts[i]-ts[i-1]);o.monotonic=d.every(x=>x>0);
+ const p=d.filter(x=>x>0).sort((a,b)=>a-b);if(!p.length)return o;const m=p.length>>1,med=p.length%2?p[m]:(p[m-1]+p[m])/2;
+ o.median=med;o.fps=1000/med;o.dropped=p.filter(x=>x>1.5*med).reduce((a,x)=>a+Math.max(0,Math.round(x/med)-1),0);o.usable=o.monotonic;return o}
+function kin(rec){/* per-stroke finite differences on the original time base; pointer-derived, not clinical */
+ const pts=rec.samples,sp=[];let len=0;
+ for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i];if(a.s!==b.s)continue;const dt=(b.t-a.t)/1000;if(dt<=0)continue;
+  const d=Math.hypot(b.x-a.x,b.y-a.y);len+=d;sp.push({t:b.t,v:d/dt})}
+ const ac=[];for(let i=1;i<sp.length;i++){const dt=(sp[i].t-sp[i-1].t)/1000;if(dt>0)ac.push({t:sp[i].t,v:(sp[i].v-sp[i-1].v)/dt})}
+ const jk=[];for(let i=1;i<ac.length;i++){const dt=(ac[i].t-ac[i-1].t)/1000;if(dt>0)jk.push({t:ac[i].t,v:(ac[i].v-ac[i-1].v)/dt})}
+ const dur=pts.length?(pts[pts.length-1].t-pts[0].t)/1000:0,strokes=new Set(pts.map(p=>p.s)).size;
+ const ev=rec.events||[],pauses=[];for(let i=0;i<ev.length-1;i++)if(ev[i].type==="up"&&ev[i+1].type==="down")pauses.push((ev[i+1].t-ev[i].t)/1000);
+ const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+ return{sp,len,dur,strokes,meanSpeed:mean(sp.map(x=>x.v)),maxSpeed:sp.length?Math.max(...sp.map(x=>x.v)):null,
+  maxAcc:ac.length?Math.max(...ac.map(x=>Math.abs(x.v))):null,maxJerk:jk.length?Math.max(...jk.map(x=>Math.abs(x.v))):null,pause:pauses.reduce((a,b)=>a+b,0)}}
+function drawRec(cv,rec,color){const c=cv.getContext("2d"),W=cv.width,H=cv.height;c.clearRect(0,0,W,H);c.lineWidth=5;c.lineCap=c.lineJoin="round";
+ c.strokeStyle=color||getComputedStyle(document.documentElement).getPropertyValue("--trace");let last=null;
+ rec.samples.forEach(p=>{c.beginPath();if(last&&last.s===p.s){c.moveTo(last.x*W,last.y*H);c.lineTo(p.x*W,p.y*H);c.stroke()}else{c.arc(p.x*W,p.y*H,2.5,0,7);c.stroke()}last=p})}
+
+/* ---- pages ---- */
+const P={};
+P.home=()=>`<h1>Write in the air. Be understood.</h1>
+<p>ParkiScribe is a research prototype that studies whether a camera can read letters, words and sentences written in the air by people with Parkinsonian movement difficulty. It is not a medical device and does not diagnose anything.</p>
+<div class="row"><button onclick="location.hash='studio'">Open the writing studio</button><button class="alt" onclick="location.hash='about'">What works today</button></div>
+<div class="grid"><div class="card"><h3>Every sample keeps its real time</h3><p>Each point is stored with the moment it was captured. Nothing is smoothed, resampled or filled in, and missing data stays missing.</p></div>
+<div class="card"><h3>Your label, kept separate</h3><p>The prompted text, the text you confirm and any future model guess are three different fields. A guess never replaces what you meant.</p></div>
+<div class="card"><h3>Your data stays with you</h3><p>In this hosted page, recordings live only in this browser. You can delete them at any time.</p></div></div>`;
+
+P.consent=()=>{const c=S.consent;return`<h1>Consent and privacy</h1>
+<div class="card"><h2 style="margin-top:0">What is collected</h2><ul><li>The path you write (x, y positions and capture times), the task you were prompted with, and basic device details (browser and screen size).</li>
+<li>No name, email, phone number or address. No video is recorded or stored by this page.</li></ul>
+<h2>Where it goes</h2><p>Nowhere. This page stores recordings in your browser only. It does not upload anything. A full research deployment would add a server, ethics approval and a separate consent form.</p>
+<h2>Withdrawing</h2><p>Use the button below to delete every recording and your consent record from this browser.</p>
+<p class="mute">This is the pilot-mode consent for nonclinical testing. It is not an ethics-approved research consent and does not replace one.</p></div>
+${c?`<p class="okc">Consent recorded on ${esc(new Date(c.at).toLocaleString())} (version ${esc(c.version)}).</p><button class="alt" id="wd">Withdraw and delete all my data</button>`:
+`<div class="card"><label><input type="checkbox" id="c1" style="width:auto;min-height:0"> I understand this is nonclinical testing and I agree to record my air-writing on this device.</label>
+<button id="cg" disabled style="margin-top:12px">Give consent</button></div>`}`};
+P.consent.init=()=>{const g=$("#cg");if(g){const k=$("#c1");k.onchange=()=>g.disabled=!k.checked;g.onclick=()=>{S.consent={version:"PILOT-1",at:new Date().toISOString(),recording:true,video:false};save();route()}}
+ const w=$("#wd");if(w)w.onclick=()=>{if(confirm("Delete all recordings and your consent from this browser?")){S={consent:null,recs:[]};save();route()}}};
+
+P.about=()=>`<h1>About and limits</h1>
+<div class="card"><h2 style="margin-top:0">What this page does</h2><ul>
+<li>Captures writing as time-stamped points from a mouse, finger on a touchscreen or stylus (pointer capture), with separate strokes and pen-lift gaps.</li>
+<li>Measures how regular the capture timing is and how many frames were probably dropped.</li>
+<li>Checks your camera’s real frame rate and resolution.</li>
+<li>Computes speed, acceleration and jerk from the original time base, and shows recordings and counts that come only from what you saved.</li></ul></div>
+<div class="card"><h2 style="margin-top:0">What it does not do yet</h2><ul>
+<li><b>No hand tracking in this hosted page.</b> Pointer capture stands in for fingertip tracking. The hand tracker (all 21 landmarks, gestures) exists in the source project but needs a locally served MediaPipe model, which a hosted page cannot load.</li>
+<li><b>No recognition.</b> No model has been trained, so there are no predictions and no accuracy figures.</li>
+<li>No server, accounts, researcher roles, ethics-protocol activation, dataset export or statistics. Those exist only as backend code and are not connected here.</li>
+<li>Pointer-derived movement values are not clinical measurements.</li></ul></div>
+<p class="mute">Measured values describe the captured movement only. ParkiScribe makes no diagnosis and assigns no disease severity.</p>`;
+
+let cam=null;
+P.studio=()=>{if(!S.consent)return`<h1>Writing studio</h1><div class="card"><p>Give consent before recording.</p><button onclick="location.hash='consent'">Go to consent</button></div>`;
+ return`<h1>Writing studio</h1><div class="grid"><div>
+<div class="row"><div><label for="tt">Task</label><select id="tt"><option value="character">Character</option><option value="word">Word</option><option value="sentence">Sentence</option><option value="freeform">Free writing</option></select></div>
+<div id="lw"><label for="tl">Prompt</label><select id="tl"></select></div><div id="fw" hidden><label for="fl">Text you intend to write</label><input id="fl" maxlength="120"></div></div>
+<div class="prompt" id="pr"></div>
+<canvas id="cv" width="900" height="480" aria-label="Writing area"></canvas>
+<div class="row" style="margin-top:10px"><button id="rec">Start recording</button><button class="alt" id="clr" disabled>Clear</button><span id="st" class="mute">Press Start, then write with your mouse, finger or stylus.</span></div></div>
+<div><div class="card" id="res"><b>Capture quality</b><p class="mute">Appears after you stop.</p></div>
+<div class="card" id="cam"><b>Camera check</b><p class="mute">Measures the real frame rate your camera delivers. Video is not recorded or stored.</p><button class="alt" id="cb">Start camera check</button><div id="cr"></div></div></div></div>`};
+P.studio.init=()=>{if(!S.consent)return;
+ const tt=$("#tt"),tl=$("#tl"),pr=$("#pr"),cv=$("#cv");let rec=false,t0=0,sid=0,down=false,samples=[],events=[],cur=null;
+ const prompt=()=>{const free=tt.value==="freeform";$("#lw").hidden=free;$("#fw").hidden=!free;pr.textContent=free?($("#fl").value||"Write anything"):tl.value};
+ const fill=()=>{tl.innerHTML=TASKS[tt.value].map(x=>`<option>${esc(x)}</option>`).join("");prompt()};
+ tt.onchange=fill;tl.onchange=prompt;$("#fl").oninput=prompt;fill();
+ const pos=e=>{const r=cv.getBoundingClientRect();return{x:Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)),y:Math.min(1,Math.max(0,(e.clientY-r.top)/r.height))}};
+ const ctx=cv.getContext("2d");const redraw=()=>drawRec(cv,{samples});
+ cv.onpointerdown=e=>{if(!rec)return;cv.setPointerCapture(e.pointerId);down=true;sid++;const t=performance.now()-t0,p=pos(e);events.push({t,type:"down"});samples.push({t,x:p.x,y:p.y,s:sid,pt:e.pointerType});redraw()};
+ cv.onpointermove=e=>{if(!rec||!down)return;const t=performance.now()-t0,p=pos(e);samples.push({t,x:p.x,y:p.y,s:sid,pt:e.pointerType});redraw()};
+ cv.onpointerup=cv.onpointercancel=e=>{if(!rec||!down)return;down=false;events.push({t:performance.now()-t0,type:"up"})};
+ $("#rec").onclick=()=>{if(!rec){samples=[];events=[];sid=0;t0=performance.now();rec=true;$("#rec").textContent="Stop recording";$("#clr").disabled=true;$("#st").textContent="Recording. Write now.";redraw();return}
+  rec=false;down=false;$("#rec").textContent="Start recording";$("#clr").disabled=false;$("#st").textContent="Stopped.";
+  const intended=tt.value==="freeform"?$("#fl").value.trim():tl.value;const q=timing(samples.map(s=>s.t));
+  const r={id:"rec_"+Date.now().toString(36),created:new Date().toISOString(),task:tt.value,intended,confirmed:null,predicted:null,mode:"pilot",synthetic:false,
+   source:"pointer",device:{ua:navigator.userAgent,screen:[screen.width,screen.height],dpr:devicePixelRatio},samples,events,timing:q};
+  const k=kin(r);cur=r;
+  $("#res").innerHTML=`<b>Capture quality</b><p>${q.n} points, ${k.strokes} stroke${k.strokes===1?"":"s"}, ${num(k.dur,2)} s. Median interval ${num(q.median,1)} ms (${num(q.fps,0)} Hz), about ${q.dropped} dropped.
+  ${q.usable?"":'<span class="err">Timestamps unusable (too few points).</span>'}</p>
+  <label for="cf">Text you actually wrote (confirm or correct)</label><input id="cf" value="${esc(intended)}" maxlength="120">
+  <p class="mute">Model prediction: none. No recognizer has been trained.</p><div class="row"><button id="sv" ${q.usable&&intended?"":"disabled"}>Save recording</button></div><p id="sm"></p>`;
+  const sv=$("#sv");if(sv)sv.onclick=()=>{cur.confirmed=$("#cf").value.trim()||null;S.recs.push(cur);const ok=save();$("#sm").innerHTML=ok?'<span class="okc">Saved in this browser.</span>':'<span class="err">Could not save: browser storage is unavailable or full.</span>';sv.disabled=true}};
+ $("#clr").onclick=()=>{samples=[];events=[];redraw();$("#res").innerHTML="<b>Capture quality</b><p class=\"mute\">Appears after you stop.</p>"};
+ $("#cb").onclick=async()=>{const out=$("#cr");if(cam){cam.stop();return}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){out.innerHTML='<p class="err">This browser cannot access a camera.</p>';return}
+  try{const stream=await navigator.mediaDevices.getUserMedia({video:{frameRate:{ideal:60},width:{ideal:1280}},audio:false});
+   const v=document.createElement("video");v.muted=true;v.playsInline=true;v.srcObject=stream;await v.play();out.innerHTML="";out.appendChild(v);const info=document.createElement("p");out.appendChild(info);
+   const st=stream.getVideoTracks()[0].getSettings(),ts=[];const useV="requestVideoFrameCallback" in v;let run=true,t1=performance.now();
+   const tick=(now,meta)=>{if(!run)return;ts.push(meta&&meta.mediaTime!=null?meta.mediaTime*1000:now);if(ts.length>1&&ts.length%15===0){const q=timing(ts.slice(-120));info.textContent=`Measured ${num(q.fps,1)} FPS (median over recent frames), about ${q.dropped} dropped, ${v.videoWidth}×${v.videoHeight}. Driver reports ${st.frameRate??"unknown"} FPS. Timing: ${useV?"video frame callback":"animation frame fallback (less exact)"}.`}
+    useV?v.requestVideoFrameCallback(tick):requestAnimationFrame(tick)};useV?v.requestVideoFrameCallback(tick):requestAnimationFrame(tick);
+   $("#cb").textContent="Stop camera check";cam={stop(){run=false;stream.getTracks().forEach(t=>t.stop());cam=null;$("#cb").textContent="Start camera check"}}}
+  catch(e){out.innerHTML=`<p class="err">Camera unavailable (${esc(e.name)}). Allow camera access in the browser and make sure no other app is using it.</p>`}}};
+
+P.sessions=()=>{const r=S.recs;if(!r.length)return`<h1>My recordings</h1><div class="card"><p>No recordings yet.</p><button onclick="location.hash='studio'">Record your first one</button></div>`;
+ return`<h1>My recordings</h1><div class="grid"><div class="card scroll"><table><thead><tr><th>Task</th><th>Prompted</th><th>Confirmed</th><th>Points</th><th></th></tr></thead><tbody>
+ ${r.map((x,i)=>`<tr><td>${esc(x.task)}</td><td>${esc(x.intended)}</td><td>${esc(x.confirmed??"")}</td><td>${x.samples.length}</td><td><button class="alt" data-v="${i}">View</button></td></tr>`).join("")}</tbody></table></div>
+ <div class="card" id="vw"><p class="mute">Choose a recording to view its path and movement measurements.</p></div></div>`};
+P.sessions.init=()=>{document.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{const x=S.recs[+b.dataset.v],k=kin(x),q=x.timing,vw=$("#vw");
+ vw.innerHTML=`<canvas id="c2" width="600" height="340"></canvas><canvas id="c3" width="600" height="200" style="margin-top:10px"></canvas>
+ <p><span class="tag">pointer-derived</span> ${k.strokes} strokes, path ${num(k.len,2)} canvas-widths, ${num(k.dur,2)} s, pauses ${num(k.pause,2)} s.</p>
+ <p>Mean speed ${num(k.meanSpeed)} and max ${num(k.maxSpeed)} widths/s; max |acceleration| ${num(k.maxAcc,1)}; max |jerk| ${num(k.maxJerk,0)}. These describe the captured path, not a clinical measure.</p>
+ <p>Capture: ${num(q.fps,0)} Hz median, ${q.dropped} dropped, source ${esc(x.source)}. Prediction: ${x.predicted??"none"}.</p>
+ <div class="row"><button class="alt" id="cp">Copy raw JSON</button><button class="alt" id="dl">Delete this recording</button></div><p id="m"></p>`;
+ drawRec($("#c2"),x);const c3=$("#c3"),c=c3.getContext("2d"),W=c3.width,H=c3.height;c.clearRect(0,0,W,H);c.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue("--trace");c.lineWidth=2;
+ c.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--mute");c.font="14px sans-serif";c.fillText("Speed over time",8,16);
+ if(k.sp.length>1){const mx=Math.max(...k.sp.map(s=>s.v))||1,t0=k.sp[0].t,t1=k.sp[k.sp.length-1].t||1;c.beginPath();k.sp.forEach((s,i)=>{const X=(s.t-t0)/(t1-t0||1)*(W-20)+10,Y=H-12-(s.v/mx)*(H-40);i?c.lineTo(X,Y):c.moveTo(X,Y)});c.stroke()}
+ $("#cp").onclick=async()=>{try{await navigator.clipboard.writeText(JSON.stringify(x));$("#m").textContent="Copied."}catch(e){$("#m").innerHTML='<span class="err">Copy was blocked by the browser.</span>'}};
+ $("#dl").onclick=()=>{S.recs.splice(+b.dataset.v,1);save();route()}})};
+
+P.research=()=>{const r=S.recs;const by={};r.forEach(x=>by[x.task]=(by[x.task]||0)+1);
+ const tm=r.map(x=>x.timing).filter(t=>t&&t.usable);const avg=a=>a.length?a.reduce((p,c)=>p+c,0)/a.length:null;
+ return`<h1>Research view</h1><p class="mute">Counts and averages below are computed live from recordings saved in this browser. There is no shared dataset here.</p>
+ <div class="grid"><div class="card stat"><b>${r.length}</b>recordings</div><div class="card stat"><b>${r.reduce((a,x)=>a+x.samples.length,0)}</b>raw points</div>
+ <div class="card stat"><b>${r.filter(x=>x.confirmed!==null&&x.confirmed!==x.intended).length}</b>corrected by writer</div><div class="card stat"><b>${r.filter(x=>x.predicted).length}</b>with a model prediction</div></div>
+ <div class="card"><h3 style="margin-top:0">By task</h3>${Object.keys(by).length?`<ul>${Object.entries(by).map(([k,v])=>`<li>${esc(k)}: ${v}</li>`).join("")}</ul>`:'<p class="mute">Nothing recorded.</p>'}
+ <h3>Capture timing</h3><p>${tm.length?`Mean median-interval ${num(avg(tm.map(t=>t.median)),1)} ms (${num(avg(tm.map(t=>t.fps)),0)} Hz); ${tm.reduce((a,t)=>a+t.dropped,0)} probable dropped frames across ${tm.length} usable recordings.`:'<span class="mute">No usable recordings yet.</span>'}</p>
+ <p class="mute">Pointer capture rates depend on the device and are not camera frame rates. Camera rate is measured separately in the studio.</p></div>
+ <div class="card"><h3 style="margin-top:0">Not available in this page</h3><p>Participant groups, clinical metadata, annotation review, model evaluation, ablations, statistics and latency benchmarks. No model has been trained, so no accuracy, F1 or error-rate figures exist.</p></div>`};
+
+/* ---- router ---- */
+function route(){const id=(location.hash||"#home").slice(1);const page=P[id]?id:"home";
+ if(cam&&page!=="studio")cam.stop();
+ $("#nav").innerHTML=PAGES.map(([k,l])=>`<a href="#${k}" ${k===page?'aria-current="page"':""}>${l}</a>`).join("");
+ $("#app").innerHTML=P[page]();if(P[page].init)P[page].init();window.scrollTo(0,0)}
+addEventListener("hashchange",route);route();
+</script>
+</body>
+</html>
